@@ -3,13 +3,14 @@
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agent_core import OwnlyAgent  # noqa: E402
-from storage import OwnlyStore  # noqa: E402
+from storage import OwnlyStore, demo_history_records  # noqa: E402
 
 
 class OwnlyAgentTest(unittest.TestCase):
@@ -27,6 +28,24 @@ class OwnlyAgentTest(unittest.TestCase):
         state = self.agent.snapshot()
         self.assertEqual(state["summary"]["total"], 10)
         self.assertEqual(state["summary"]["categories"], 5)
+
+    def test_demo_history_lands_in_current_month_and_is_idempotent(self) -> None:
+        """演示历史流水必须落在当月账单里，重复写入不会重复计钱。"""
+        records = demo_history_records()
+        month = date.today().strftime("%Y-%m")
+        self.assertTrue(all(record["occurred_at"].startswith(month) for record in records))
+        expected = sum(
+            record["amount"] for record in records if record["value_kind"] in {"realized", "avoided"}
+        )
+        self.agent.store.seed_demo_history(records)
+        self.assertEqual(self.agent.snapshot()["value_report"]["secured"], expected)
+        self.agent.store.seed_demo_history(records)  # 再写一次不应翻倍
+        self.assertEqual(self.agent.snapshot()["value_report"]["secured"], expected)
+
+    def test_demo_history_clamps_to_first_of_month(self) -> None:
+        """月初重置时，历史流水不会退到上个月而漏出当月账单。"""
+        records = demo_history_records(date(2026, 3, 2))
+        self.assertTrue(all(record["occurred_at"].startswith("2026-03") for record in records))
 
     def test_seed_has_charger_two_location_records(self) -> None:
         """行程演示依赖双地点充电器档案：家中一支 + 公司工位备用一支。"""

@@ -230,6 +230,16 @@ class OwnlyStore:
             if item["item_id"] not in existing_ids:
                 self.add_item(item)
 
+    def seed_demo_history(self, records: list[dict[str, Any]]) -> None:
+        """幂等写入演示历史价值流水。
+
+        目的：让首次启动和演示重置后的账本都有内容，而不是一片空白。
+        原理：record_value_event 以 source_key 做 UPSERT，同一条历史反复写入
+        只会刷新日期，不会重复累计金额——所以每次重置后调用都是安全的。
+        """
+        for record in records:
+            self.record_value_event(record)
+
     def add_item(self, item: dict[str, Any]) -> dict[str, Any]:
         payload = dict(item)
         payload.setdefault("item_id", f"item-{uuid4().hex[:8]}")
@@ -687,4 +697,47 @@ def demo_item_records() -> list[dict[str, Any]]:
         {"item_id":"sunscreen","name":"防晒霜 SPF50+","category":"护肤","icon":"◒","source":"订单同步","brand":"Solstice","location":"家中","acquired_at":(today-timedelta(days=2)).isoformat(),"purchase_price":269,"current_value":269,"attributes":{"容量":"90ml","防晒值":"SPF50+ PA++++"},"next_action":"出行携带提醒","next_action_date":(today+timedelta(days=30)).isoformat()},
         {"item_id":"projector","name":"Beam Mini 投影仪","category":"电子","icon":"◉","source":"订单同步","brand":"Beam","location":"客厅","acquired_at":(today-timedelta(days=5)).isoformat(),"purchase_price":2399,"current_value":2399,"attributes":{"退货截止":(today+timedelta(days=2)).isoformat(),"订单号":"BM-20481","使用次数":"1 次"},"next_action":"退货期剩 2 天","next_action_date":(today+timedelta(days=2)).isoformat()},
         {"item_id":"console","name":"Switch OLED 掌机","category":"电子","icon":"◉","source":"订单同步","brand":"Nintendo","location":"电视柜","acquired_at":(today-timedelta(days=420)).isoformat(),"purchase_price":2599,"current_value":1450,"attributes":{"闲置天数":"128","预计转售价":"¥1450","包装配件":"完整"},"next_action":"建议评估转售","next_action_date":today.isoformat()},
+    ]
+
+
+def demo_history_records(today: date | None = None) -> list[dict[str, Any]]:
+    """演示用的历史价值流水，让重置后的账本自带一段真实发生过的事。
+
+    目的：评委第一次打开时，看到的不是「¥0 本月已经守住」和一屏空白，
+    而是已经发生的价值，并且每一笔都能在物品仓里对上号。
+    输入输出：返回可直接传给 OwnlyStore.record_value_event 的记录列表。
+    原理：账单按 occurred_at 的月份过滤（storage.value_report），所以日期取
+    「本月之内」——往前推 n 天，如果推出了本月就落在 1 号，保证一定被当月账单
+    统计到，不会出现「种了历史但首屏仍是 ¥0」的情况。
+    选取范围：只挂在没有被实时任务占用的物品上（椅子、口红），
+    避免和演示中真实产生的保价、购前拦截、转售三笔流水语义重复。
+    """
+    current = today or date.today()
+
+    def within_month(days_ago: int) -> str:
+        """返回本月内的一个日期：往前推 days_ago 天，但不跨到上个月。"""
+        target = current - timedelta(days=days_ago)
+        if (target.year, target.month) != (current.year, current.month):
+            target = current.replace(day=1)
+        return target.isoformat()
+
+    return [
+        {
+            "source_key": "demo-history:chair-price-protection",
+            "item_id": "chair",
+            "value_kind": "realized",
+            "amount": 180,
+            "title": "价保到账：人体工学椅",
+            "detail": "购买后 30 天内降价 ¥180，Agent 比对订单后提交保价申请并到账。",
+            "occurred_at": within_month(5),
+        },
+        {
+            "source_key": "demo-history:lipstick-duplicate-check",
+            "item_id": "lipstick",
+            "value_kind": "avoided",
+            "amount": 239,
+            "title": "避免重复购买：口红",
+            "detail": "购前检查发现同类口红开封期限还剩 5 个月，建议先用完再买。",
+            "occurred_at": within_month(2),
+        },
     ]

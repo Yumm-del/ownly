@@ -11,13 +11,15 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from agent_core import CATEGORY_RULES, OwnlyAgent
-from storage import OwnlyStore, demo_item_records
+from storage import OwnlyStore, demo_history_records, demo_item_records
 
 HOST, PORT = "127.0.0.1", 8765
 ROOT = Path(__file__).parent
 STATIC_DIR = ROOT / "static"
 STORE = OwnlyStore(ROOT / "ownly.db")
 AGENT = OwnlyAgent(STORE)
+# 首次启动时补上演示历史流水，让新克隆下来的仓库打开就有内容
+STORE.seed_demo_history(demo_history_records())
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -150,6 +152,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _reset() -> dict[str, Any]:
         STORE.clear()
         STORE.seed_if_empty(demo_item_records())
+        STORE.seed_demo_history(demo_history_records())
         return AGENT.snapshot()
 
     def _read_json(self) -> dict[str, Any]:
