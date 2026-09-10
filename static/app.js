@@ -1,4 +1,4 @@
-for (const href of ["/warehouse.css", "/agent-ui.css", "/category-ui.css", "/item-detail.css", "/journey-ui.css", "/resale-ui.css", "/value-ui.css", "/workbench-ui.css"]) {
+for (const href of ["/warehouse.css", "/agent-ui.css", "/category-ui.css", "/item-detail.css", "/journey-ui.css", "/resale-ui.css", "/value-ui.css", "/workbench-ui.css", "/tour-ui.css"]) {
   const link = document.createElement("link");
   link.rel = "stylesheet";
   link.href = href;
@@ -31,6 +31,8 @@ document.body.insertAdjacentHTML("beforeend", `
   </dialog>`);
 
 document.querySelector(".header-actions").insertAdjacentHTML("afterbegin", `<button id="policyButton" class="icon-button" type="button" aria-label="打开授权策略中心">◎</button>`);
+// 评委会先看到这个按钮：不用摸索，直接看完整条主线
+document.querySelector(".brief-actions").insertAdjacentHTML("afterbegin", `<button id="tourButton" class="tour-button" type="button">▶ 40 秒看完整条主线</button>`);
 document.querySelector("#taskReason").insertAdjacentHTML("afterend", `<details id="agentWorkbench" class="agent-workbench"><summary><span>查看 Agent 为什么这样做</span><b id="traceLevel">L0</b></summary><div id="traceContent"></div></details>`);
 document.body.insertAdjacentHTML("beforeend", `
   <dialog id="policyDialog" class="add-dialog policy-dialog">
@@ -342,4 +344,162 @@ elements.handoffPanel.addEventListener("click", async (event) => {
   toast(button.dataset.handoff === "share" ? "当前设备不支持分享，已改为复制全部素材" : "标题、描述、价格和拍摄清单已复制");
 });
 $("#resetButton").addEventListener("click", async () => { activeCategory = "全部"; activeTask = 0; render(await api("/api/reset")); toast("演示仓已重置"); });
-fetch("/api/state").then((response) => response.json()).then(render).catch(() => toast("无法连接 Ownly Agent"));
+
+/* ==================== 评委导览：40 秒走完整条主线 ====================
+   目的：第一次打开的人不知道该点哪里，很容易错过产品最关键的部分。
+   这条导览按真实接口把主线走一遍，底部讲解条告诉评委"现在该看什么"、
+   "它为什么重要"。
+   原理：每一步 = 一次真实 API 调用（或一次真实界面操作）+ 一句讲解。
+   这里没有专为演示准备的假路径——导览走的就是用户自己走的同一条路，
+   所以它同时也是录 1 分钟视频时的分镜脚本。 */
+
+const TOUR_STEPS = [
+  {
+    hold: 4500,
+    text: "此刻没有需要你决定的事。Ownly 保持安静——安静是它的默认状态，而不是一屏待办清单。",
+    run: async () => {
+      activeCategory = "全部";
+      activeTask = 0;
+      render(await api("/api/reset"));
+      window.scrollTo({ top: 0 });
+    },
+  },
+  {
+    hold: 4600,
+    text: "环境变化：你正在离开家，而深圳行程 3 小时 40 分后出发。",
+    run: async () => {
+      activeTask = 0;
+      render(await api("/api/context-event"));
+    },
+  },
+  {
+    hold: 8500,
+    text: "不用打开 App，行动自己到达：家中那支 65W 充电器还没进包，公司工位还有一支备用——忘带时顺路可取，不必回家。",
+    run: () => focusTourCard(),
+  },
+  {
+    hold: 7500,
+    text: "每一步都能追问：支持证据、反证，以及它命中了哪一条长期策略。",
+    run: () => {
+      elements.agentWorkbench.open = true;
+      elements.agentWorkbench.scrollIntoView({ behavior: "smooth", block: "center" });
+    },
+  },
+  {
+    hold: 6000,
+    text: "你只需要做决定，执行交给它：一键生成出发清单，并同步到手表。",
+    run: async () => {
+      elements.agentWorkbench.open = false;
+      const task = (state.tasks || [])[0];
+      if (!task) return;
+      const actions = task.ui_schema.actions || [];
+      const primary = actions.find((action) => action.style === "primary") || actions[0];
+      if (!primary) return;
+      render(await api("/api/execute", { task_id: task.task_id, action_id: primary.id }));
+      elements.claim.textContent = "任务结果已写入长期记忆，并同步到 Watch。";
+      elements.completion.hidden = false;
+    },
+  },
+  {
+    hold: 6500,
+    text: () => `本月已经守住 ${money(state.aftercare.value_created)}。每一笔都有依据，处理中的金额绝不混进"已经守住"。`,
+    run: () => elements.valueReportDialog.showModal(),
+  },
+  {
+    hold: 6000,
+    text: "这就是所有权层：你只管出发，物品自己就位。",
+    run: () => {
+      elements.valueReportDialog.close();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+  },
+];
+
+let tourRunning = false;
+let tourTimers = [];
+let tourWake = null;
+
+/** 高亮当前被讲解的那张卡，让人知道该看哪里。 */
+function focusTourCard() {
+  elements.opportunity.classList.add("tour-focus");
+  elements.opportunity.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** 可被打断的等待：跳过导览时立刻唤醒，不留悬挂的定时器。 */
+function tourSleep(milliseconds) {
+  return new Promise((resolve) => {
+    tourWake = resolve;
+    tourTimers.push(setTimeout(() => { tourWake = null; resolve(); }, milliseconds));
+  });
+}
+
+/** 懒创建导览的 DOM，只在第一次点击时插入页面。 */
+function tourLayer() {
+  let layer = document.querySelector("#tourLayer");
+  if (layer) return layer;
+  document.body.insertAdjacentHTML("beforeend", `
+    <div id="tourLayer" class="tour-layer" hidden>
+      <div class="tour-caption">
+        <span class="tour-step" id="tourStep"></span>
+        <p id="tourText"></p>
+        <div class="tour-foot">
+          <div class="tour-dots" id="tourDots"></div>
+          <button class="tour-skip" id="tourSkip" type="button">跳过导览</button>
+        </div>
+      </div>
+    </div>`);
+  document.querySelector("#tourSkip").addEventListener("click", stopTour);
+  return document.querySelector("#tourLayer");
+}
+
+async function runTour() {
+  if (tourRunning) return;
+  tourRunning = true;
+  const layer = tourLayer();
+  layer.hidden = false;
+  elements.valueReportDialog.close();
+  for (let index = 0; index < TOUR_STEPS.length; index += 1) {
+    if (!tourRunning) return;
+    const step = TOUR_STEPS[index];
+    document.querySelector("#tourStep").textContent = `第 ${index + 1} / ${TOUR_STEPS.length} 步`;
+    document.querySelector("#tourText").textContent = typeof step.text === "function" ? step.text() : step.text;
+    document.querySelector("#tourDots").innerHTML = TOUR_STEPS
+      .map((_, dot) => `<i class="${dot === index ? "is-active" : dot < index ? "is-done" : ""}"></i>`).join("");
+    // 重放一次入场动画，让每一步的切换在视觉上看得出来
+    const caption = layer.querySelector(".tour-caption");
+    caption.style.animation = "none";
+    void caption.offsetWidth;
+    caption.style.animation = "";
+    try {
+      await step.run();
+    } catch (error) {
+      toast(error.message || "导览中断");
+      break;
+    }
+    if (!tourRunning) return;
+    await tourSleep(step.hold);
+  }
+  stopTour();
+}
+
+/** 结束或跳过导览：清掉定时器、高亮和展开状态，把界面还给用户。 */
+function stopTour() {
+  const wasRunning = tourRunning;
+  tourRunning = false;
+  tourTimers.forEach(clearTimeout);
+  tourTimers = [];
+  if (tourWake) { tourWake(); tourWake = null; }
+  elements.opportunity.classList.remove("tour-focus");
+  elements.agentWorkbench.open = false;
+  const layer = document.querySelector("#tourLayer");
+  if (layer) layer.hidden = true;
+  if (wasRunning) toast("导览结束，现在可以自己探索了");
+}
+
+$("#tourButton").addEventListener("click", runTour);
+
+fetch("/api/state").then((response) => response.json()).then((next) => {
+  render(next);
+  // 支持 ?tour=1 直接进入导览，方便把链接发给评委或用来录屏
+  if (new URLSearchParams(location.search).get("tour") === "1") runTour();
+}).catch(() => toast("无法连接 Ownly Agent"));

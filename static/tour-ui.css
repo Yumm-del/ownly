@@ -1,0 +1,107 @@
+/* 评委导览：让第一次打开的人不用摸索就能看完整条主线。
+   视觉沿用界面的深绿 + 柠檬绿，讲解条固定在底部，不遮挡上方的产品画面。 */
+
+/* 触发按钮：放在「今天的购买守护」区块里，是给人看的第一入口 */
+.tour-button {
+  background: #d9ff57;
+  color: #17231c;
+  border: 0;
+  border-radius: 999px;
+  padding: 11px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(23, 63, 45, .18);
+}
+
+.tour-button:hover { transform: translateY(-1px); }
+.tour-button:active { transform: translateY(0); }
+
+/* 导览进行时：整层截获点击，避免误触打断脚本；只有「跳过」可点 */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(23, 35, 28, .06);
+}
+
+.tour-layer[hidden] { display: none; }
+
+/* 底部讲解条 */
+.tour-caption {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  background: #17231c;
+  color: #fffdf8;
+  border-radius: 20px;
+  padding: 18px 20px 14px;
+  box-shadow: 0 20px 44px rgba(23, 35, 28, .38);
+  animation: tour-rise .32s ease-out;
+}
+
+@keyframes tour-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.tour-caption p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.tour-caption .tour-step {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: #d9ff57;
+}
+
+.tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+
+.tour-dots { display: flex; gap: 6px; }
+
+.tour-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 253, 248, .26);
+  transition: background .2s, width .2s;
+}
+
+.tour-dots i.is-done { background: rgba(217, 255, 87, .5); }
+.tour-dots i.is-active { width: 18px; border-radius: 999px; background: #d9ff57; }
+
+.tour-skip {
+  background: none;
+  border: 0;
+  padding: 4px 2px;
+  color: rgba(255, 253, 248, .68);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.tour-skip:hover { color: #d9ff57; }
+
+/* 被讲解的那张卡：加一圈光，指明现在该看哪里 */
+.tour-focus {
+  outline: 2px solid #d9ff57;
+  outline-offset: 4px;
+  border-radius: 20px;
+  box-shadow: 0 0 0 10px rgba(217, 255, 87, .12);
+  transition: outline-color .2s, box-shadow .2s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-caption { animation: none; }
+}
