@@ -7,3 +7,4 @@ ownly.db-shm
 ownly.db-wal
 server.log
 .DS_Store
+docs/spotlight-application-draft.md
