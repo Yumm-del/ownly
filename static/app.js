@@ -1,0 +1,345 @@
+for (const href of ["/warehouse.css", "/agent-ui.css", "/category-ui.css", "/item-detail.css", "/journey-ui.css", "/resale-ui.css", "/value-ui.css", "/workbench-ui.css"]) {
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = href;
+  document.head.appendChild(link);
+}
+
+document.body.insertAdjacentHTML("beforeend", `
+  <dialog id="categoryDialog" class="add-dialog category-dialog">
+    <div class="catalog-head">
+      <div><p class="eyebrow">CATEGORY MAP</p><h2>全部品类</h2><p>每个品类都有自己的生命周期规则。</p></div>
+      <button class="icon-button" type="button" data-close-catalog aria-label="关闭品类">×</button>
+    </div>
+    <div id="categoryCatalog" class="category-catalog"></div>
+  </dialog>`);
+
+document.body.insertAdjacentHTML("beforeend", `
+  <dialog id="itemDialog" class="add-dialog item-dialog">
+    <article id="itemDetail"></article>
+  </dialog>`);
+
+document.body.insertAdjacentHTML("beforeend", `
+  <dialog id="valueReportDialog" class="add-dialog value-report-dialog">
+    <article>
+      <header><div><p class="eyebrow">MONTHLY VALUE REPORT</p><h2 id="reportMonth">本月价值账单</h2></div><button id="closeValueReport" class="icon-button" type="button" aria-label="关闭价值账单">×</button></header>
+      <p class="report-lead"><strong id="reportSecured">¥0</strong><span>已经到账或明确避免的支出</span></p>
+      <div id="reportTotals" class="report-totals"></div>
+      <section><h3>每一笔都有依据</h3><ol id="reportEvents" class="report-events"></ol></section>
+      <p class="privacy-note">数据保存在本地。处理中和潜在价值不会计入“已经守住”。</p>
+    </article>
+  </dialog>`);
+
+document.querySelector(".header-actions").insertAdjacentHTML("afterbegin", `<button id="policyButton" class="icon-button" type="button" aria-label="打开授权策略中心">◎</button>`);
+document.querySelector("#taskReason").insertAdjacentHTML("afterend", `<details id="agentWorkbench" class="agent-workbench"><summary><span>查看 Agent 为什么这样做</span><b id="traceLevel">L0</b></summary><div id="traceContent"></div></details>`);
+document.body.insertAdjacentHTML("beforeend", `
+  <dialog id="policyDialog" class="add-dialog policy-dialog">
+    <article><header><div><p class="eyebrow">AGENT AUTONOMY</p><h2>授权策略中心</h2></div><button id="closePolicy" class="icon-button" type="button" aria-label="关闭授权策略">×</button></header>
+    <p class="dialog-copy">让 Ownly 记住你的边界。切换模式不会取消发布、支付和所有权转移的确认。</p>
+    <div id="modeOptions" class="mode-options"></div><section><h3>逐项策略</h3><div id="policyList" class="policy-list"></div></section></article>
+  </dialog>`);
+
+const $ = (selector) => document.querySelector(selector);
+const elements = {
+  total: $("#totalCount"), categories: $("#categoryCount"), attention: $("#attentionCount"),
+  valueCreated: $("#valueCreated"), returnCount: $("#returnCount"), idleCount: $("#idleCount"),
+  nav: $("#categoryNav"), grid: $("#itemGrid"), title: $("#listTitle"), visible: $("#visibleCount"),
+  dialog: $("#addDialog"), form: $("#addForm"), categoryInput: $("#categoryInput"),
+  intentForm: $("#intentForm"), intent: $("#intentInput"), opportunity: $("#opportunityCard"),
+  taskTitle: $("#opportunityMessage"), taskReason: $("#taskReason"), taskFacts: $("#taskFacts"),
+  taskChecklist: $("#taskChecklist"),
+  taskActions: $("#taskActions"), taskPager: $("#taskPager"), completion: $("#completionCard"),
+  claim: $("#claimDetail"), events: $("#eventList"), toast: $("#toast"),
+  categoryDialog: $("#categoryDialog"), categoryCatalog: $("#categoryCatalog"),
+  itemDialog: $("#itemDialog"), itemDetail: $("#itemDetail"),
+  resaleStudio: $("#resaleStudio"), draftStatus: $("#draftStatus"), draftTitle: $("#draftTitle"),
+  draftDescription: $("#draftDescription"), draftCondition: $("#draftCondition"), draftPrice: $("#draftPrice"),
+  draftPhotos: $("#draftPhotos"), draftActions: $("#draftActions"),
+  draftChannels: $("#draftChannels"), connectorNotice: $("#connectorNotice"),
+  handoffPanel: $("#handoffPanel"), handoffSummary: $("#handoffSummary"),
+  valueReportDialog: $("#valueReportDialog"), reportMonth: $("#reportMonth"),
+  reportSecured: $("#reportSecured"), reportTotals: $("#reportTotals"), reportEvents: $("#reportEvents"),
+  agentWorkbench: $("#agentWorkbench"), traceLevel: $("#traceLevel"), traceContent: $("#traceContent"),
+  policyDialog: $("#policyDialog"), modeOptions: $("#modeOptions"), policyList: $("#policyList"),
+};
+let state = null;
+let activeCategory = "全部";
+let activeTask = 0;
+
+async function api(path, payload = {}) {
+  const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Agent 暂时无法完成任务");
+  return data;
+}
+
+function toast(message) {
+  elements.toast.textContent = message;
+  elements.toast.classList.add("show");
+  setTimeout(() => elements.toast.classList.remove("show"), 2200);
+}
+
+const money = (value) => value == null ? "持续更新" : `¥${new Intl.NumberFormat("zh-CN").format(value)}`;
+const formatDate = (value) => value ? new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long", day: "numeric" }).format(new Date(`${value}T00:00:00`)) : "尚未记录";
+
+/** 把统一字段、品类专属属性和 Agent 任务组合成完整物品档案。 */
+function openItemDetail(itemId) {
+  const item = state.items.find((entry) => entry.item_id === itemId);
+  if (!item) return;
+  const relatedTasks = state.tasks.filter((task) => task.item_id === itemId);
+  const attributes = Object.entries(item.attributes || {});
+  const lifecycle = (state.lifecycle_events || []).filter((event) => event.item_id === itemId);
+  elements.itemDetail.innerHTML = `
+    <header class="item-detail-head">
+      <div class="detail-symbol category-${item.category}">${item.icon}</div>
+      <div><p>${item.category} · ${item.status}</p><h2>${item.name}</h2></div>
+      <button class="icon-button" type="button" data-close-item aria-label="关闭物品详情">×</button>
+    </header>
+    <section class="detail-action"><p>OWNLY NEXT</p><h3>${item.next_action}</h3><span>${formatDate(item.next_action_date)}</span></section>
+    <section class="detail-section"><h3>物品信息</h3><dl>
+      <div><dt>品牌</dt><dd>${item.brand || "尚未识别"}</dd></div>
+      <div><dt>位置</dt><dd>${item.location}</dd></div>
+      <div><dt>收录来源</dt><dd>${item.source}</dd></div>
+      <div><dt>获得日期</dt><dd>${formatDate(item.acquired_at)}</dd></div>
+      <div><dt>购买价格</dt><dd>${money(item.purchase_price)}</dd></div>
+      <div><dt>当前价值</dt><dd>${money(item.current_value)}</dd></div>
+    </dl></section>
+    <section class="detail-section"><h3>${item.category}专属信息</h3><dl>${attributes.length ? attributes.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join("") : "<div><dt>状态</dt><dd>等待 Agent 持续补全</dd></div>"}</dl></section>
+    <section class="detail-section"><h3>Agent 任务</h3>${relatedTasks.length ? relatedTasks.map((task) => `<div class="related-task"><i></i><span><strong>${task.title}</strong><small>${task.reason}</small></span></div>`).join("") : "<p class=empty-detail>现在没有需要你处理的事情。</p>"}</section>
+    <section class="detail-section"><h3>完整生命周期</h3><ol class="lifecycle-list">${lifecycle.length ? lifecycle.map((event) => `<li><time>${event.occurred_at}</time><i></i><div><strong>${event.title}</strong><small>${event.detail}</small></div></li>`).join("") : "<li><div><strong>等待第一个生命周期事件</strong></div></li>"}</ol></section>
+    <footer class="detail-foot">物品 ID · ${item.item_id}</footer>`;
+  elements.itemDialog.showModal();
+}
+
+/** Agent 决定卡片内容与动作，客户端只渲染受限 schema。 */
+function renderTask() {
+  const tasks = state.tasks || [];
+  if (!tasks.length) { elements.opportunity.hidden = true; return; }
+  activeTask = Math.min(activeTask, tasks.length - 1);
+  const task = tasks[activeTask];
+  const schema = task.ui_schema;
+  elements.opportunity.hidden = false;
+  elements.opportunity.dataset.tone = schema.tone;
+  elements.taskTitle.textContent = schema.title;
+  elements.taskReason.textContent = schema.body;
+  const sections = schema.sections || [];
+  elements.taskFacts.innerHTML = schema.facts.map((fact) => `<span>${fact}</span>`).join("") + sections.map((section) => `<div class="schema-section"><strong>${section.title}</strong><ul>${section.items.map((item) => `<li>${item}</li>`).join("")}</ul></div>`).join("");
+  // 出发卡（departure_card）额外渲染逐项物品检查清单；其余卡片隐藏该区域
+  const detailRows = schema.component === "departure_card" ? schema.checklist : (schema.discoveries || schema.comparisons || schema.checks);
+  elements.taskChecklist.hidden = !(detailRows || []).length;
+  elements.taskChecklist.innerHTML = (detailRows || []).map((row) =>
+    `<li class="trip-row is-${row.state}"><span>${row.label}</span><b>${row.verdict}</b><small>${row.detail}</small></li>`).join("");
+  elements.taskActions.innerHTML = schema.actions.map((action) => `<button type="button" data-task="${task.task_id}" data-action="${action.id}" class="${action.style === "primary" ? "primary-button light" : "secondary-button"}">${action.label}</button>`).join("");
+  elements.taskPager.innerHTML = tasks.map((_, index) => `<button type="button" data-index="${index}" class="${index === activeTask ? "active" : ""}" aria-label="查看任务 ${index + 1}"></button>`).join("");
+  const trace = task.agent_trace;
+  elements.agentWorkbench.hidden = !trace;
+  if (trace) {
+    elements.traceLevel.textContent = trace.autonomy_level;
+    elements.traceContent.innerHTML = `<p class="trace-headline">${trace.headline}</p><div class="trace-columns"><section><small>支持证据</small><ul>${trace.evidence.map((row) => `<li>${row}</li>`).join("")}</ul></section><section><small>仍需注意</small><ul>${trace.counterevidence.map((row) => `<li>${row}</li>`).join("")}</ul></section></div>${trace.matched_policy ? `<p class="matched-policy"><span>命中长期策略</span><strong>${trace.matched_policy.name}</strong><small>${trace.matched_policy.behavior === "prepare_only" ? "允许自动准备，提交前仍需确认" : "涉及外部影响时始终确认"}</small></p>` : ""}<ol class="agent-steps">${trace.steps.map((step) => `<li class="is-${step.status}"><i></i><div><strong>${step.phase}</strong><small>${step.detail}</small></div></li>`).join("")}</ol>`;
+  }
+}
+
+function renderCatalog() {
+  const counts = Object.fromEntries(state.items.map((item) => item.category).map((category) => [category, state.items.filter((item) => item.category === category).length]));
+  const groups = [...new Set(state.category_catalog.map((entry) => entry.group))];
+  elements.categoryCatalog.innerHTML = groups.map((group) => `<section><h3>${group}</h3><div>${state.category_catalog.filter((entry) => entry.group === group).map((entry) => `<button type="button" data-catalog-category="${entry.name}"><i>${entry.icon}</i><span><strong>${entry.name}</strong><small>${entry.action}</small></span><b>${counts[entry.name] || 0}</b></button>`).join("")}</div></section>`).join("");
+  elements.categoryInput.innerHTML = groups.map((group) => `<optgroup label="${group}">${state.category_catalog.filter((entry) => entry.group === group).map((entry) => `<option>${entry.name}</option>`).join("")}</optgroup>`).join("");
+}
+
+function renderDraft() {
+  const draft = (state.resale_drafts || [])[0];
+  elements.resaleStudio.hidden = !draft;
+  if (!draft) return;
+  const statusLabels = {draft:"等待选择渠道",channel_selected:"等待授权",authorized:"可以提交",published_demo:"Demo 回执已返回",sold:"已售出"};
+  elements.draftStatus.textContent = statusLabels[draft.status] || draft.status;
+  elements.draftTitle.textContent = draft.title;
+  elements.draftDescription.textContent = draft.description;
+  elements.draftCondition.textContent = draft.condition;
+  elements.draftPrice.textContent = money(draft.price);
+  elements.draftPhotos.innerHTML = draft.photos.map((photo) => `<li>${photo}</li>`).join("");
+  elements.draftChannels.innerHTML = draft.channels.map((channel) => `<button type="button" class="channel-card ${draft.selected_channel === channel.id ? "selected" : ""}" data-channel-id="${channel.id}" data-draft="${draft.draft_id}"><span><strong>${channel.name}</strong>${channel.recommended ? "<em>Agent 推荐</em>" : ""}</span><b>${money(channel.price)}</b><small>${channel.arrival}</small><small>${channel.fee}</small><i>${channel.fit}</i></button>`).join("");
+  const selectedChannel = draft.channels.find((channel) => channel.id === draft.selected_channel);
+  elements.handoffPanel.hidden = !selectedChannel || draft.status === "sold";
+  elements.handoffSummary.textContent = selectedChannel ? `${selectedChannel.name} · ${money(selectedChannel.price)} · 标题、描述、价格与 ${draft.photos.length} 张拍摄清单已整理` : "";
+  if (draft.status === "draft") elements.draftActions.innerHTML = `<p>选择一个渠道，Agent 会准备对应发布流程。</p>`;
+  else if (draft.status === "channel_selected") elements.draftActions.innerHTML = `<button class="primary-button" data-draft-action="authorize" data-draft="${draft.draft_id}">确认本次发布授权</button>`;
+  else if (draft.status === "authorized") elements.draftActions.innerHTML = `<button class="primary-button" data-draft-action="publish" data-draft="${draft.draft_id}">提交到 Demo connector</button>`;
+  else if (draft.status === "published_demo") elements.draftActions.innerHTML = `<button class="primary-button" data-draft-action="sold" data-draft="${draft.draft_id}">模拟收到售出回执并归档</button>`;
+  else elements.draftActions.innerHTML = `<p>生命周期已完成，历史记录仍然保留。</p>`;
+  elements.connectorNotice.textContent = draft.status === "published_demo" ? `Demo 回执：${draft.external_reference}。当前没有真实发布到第三方平台。` : "原型使用 Demo connector；真实发布需获得平台准入并由用户授权账号。";
+}
+
+function renderValueReport() {
+  const report = state.value_report;
+  const [year, month] = report.month.split("-");
+  const labels = {realized:"已经到账",avoided:"避免支出",pending:"处理中",potential:"潜在机会"};
+  elements.reportMonth.textContent = `${year} 年 ${Number(month)} 月价值账单`;
+  elements.reportSecured.textContent = money(report.secured);
+  elements.reportTotals.innerHTML = ["realized","avoided","pending","potential"].map((kind) => `<div class="is-${kind}"><span>${labels[kind]}</span><strong>${money(report[kind])}</strong></div>`).join("");
+  elements.reportEvents.innerHTML = report.events.length ? report.events.map((entry) => `<li><i class="is-${entry.value_kind}"></i><div><strong>${entry.title}</strong><small>${entry.detail}</small></div><span><b>${money(entry.amount)}</b><small>${labels[entry.value_kind]}</small></span></li>`).join("") : `<li class="empty-report">完成一次保价、退货、购前检查或闲置出售后，价值会出现在这里。</li>`;
+}
+
+function renderPolicyCenter() {
+  const center = state.policy_center;
+  const modes = [
+    {id:"cautious",label:"谨慎",description:"尽量先问我"},
+    {id:"balanced",label:"平衡",description:"自动准备，执行确认"},
+    {id:"managed",label:"托管",description:"按逐项策略主动工作"},
+  ];
+  elements.modeOptions.innerHTML = modes.map((mode) => `<button type="button" data-mode="${mode.id}" class="${center.mode.mode === mode.id ? "selected" : ""}"><strong>${mode.label}</strong><small>${mode.description}</small></button>`).join("");
+  const behaviorLabels = {prepare_only:"只自动准备",always_confirm:"始终需要确认"};
+  elements.policyList.innerHTML = center.policies.map((policy) => `<label><span><strong>${policy.name}</strong><small>${behaviorLabels[policy.behavior]}${policy.condition.max_amount ? ` · ¥${policy.condition.max_amount}以内` : ""}</small></span><input type="checkbox" data-policy-id="${policy.policy_id}" ${policy.enabled ? "checked" : ""}></label>`).join("");
+}
+
+function render(nextState) {
+  state = nextState;
+  elements.total.textContent = state.summary.total;
+  elements.categories.textContent = state.summary.categories;
+  elements.attention.textContent = state.summary.attention;
+  elements.valueCreated.textContent = money(state.aftercare.value_created);
+  elements.returnCount.textContent = state.aftercare.open_returns;
+  elements.idleCount.textContent = state.aftercare.idle_items;
+  const usedCategories = [...new Set(state.items.map((item) => item.category))];
+  elements.nav.innerHTML = ["全部", ...usedCategories].map((category) => `<button class="category-chip ${category === activeCategory ? "active" : ""}" data-category="${category}">${category}</button>`).join("") + `<button class="category-chip catalog-trigger" data-open-catalog>＋ 全部品类</button>`;
+  const items = activeCategory === "全部" ? state.items : state.items.filter((item) => item.category === activeCategory);
+  elements.title.textContent = activeCategory === "全部" ? "Ownly 记得的物品" : activeCategory;
+  elements.visible.textContent = `${items.length} 件`;
+  elements.grid.innerHTML = items.map((item) => `<button type="button" class="inventory-card" data-item-id="${item.item_id}" aria-label="查看 ${item.name} 的完整信息"><div class="inventory-icon category-${item.category}">${item.icon}</div><div class="inventory-main"><div class="item-meta"><span>${item.category}</span><span>${item.location}</span></div><h3>${item.name}</h3><p>${item.brand || item.source} · ${money(item.current_value)}</p><div class="next-action"><i></i><span>${item.next_action}</span></div></div><span class="card-arrow">›</span></button>`).join("");
+  elements.events.innerHTML = state.events.map((event) => `<li><strong>${event.title}</strong>${event.detail}</li>`).join("");
+  elements.completion.hidden = true;
+  renderCatalog();
+  renderTask();
+  renderDraft();
+  renderValueReport();
+  renderPolicyCenter();
+}
+
+elements.nav.addEventListener("click", (event) => {
+  if (event.target.closest("[data-open-catalog]")) { elements.categoryDialog.showModal(); return; }
+  const button = event.target.closest("button[data-category]");
+  if (!button) return;
+  activeCategory = button.dataset.category;
+  render(state);
+});
+elements.grid.addEventListener("click", (event) => {
+  const card = event.target.closest("button[data-item-id]");
+  if (card) openItemDetail(card.dataset.itemId);
+});
+elements.itemDialog.addEventListener("click", (event) => {
+  if (event.target.closest("[data-close-item]")) elements.itemDialog.close();
+});
+elements.categoryCatalog.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-catalog-category]");
+  if (!button) return;
+  activeCategory = button.dataset.catalogCategory;
+  elements.categoryDialog.close();
+  render(state);
+});
+$("[data-close-catalog]").addEventListener("click", () => elements.categoryDialog.close());
+$("#valueReportButton").addEventListener("click", () => elements.valueReportDialog.showModal());
+$("#closeValueReport").addEventListener("click", () => elements.valueReportDialog.close());
+$("#policyButton").addEventListener("click", () => elements.policyDialog.showModal());
+$("#closePolicy").addEventListener("click", () => elements.policyDialog.close());
+elements.modeOptions.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-mode]");
+  if (!button) return;
+  render(await api("/api/policy/mode", {mode:button.dataset.mode}));
+  toast(`已切换为${button.querySelector("strong").textContent}模式`);
+});
+elements.policyList.addEventListener("change", async (event) => {
+  const input = event.target.closest("input[data-policy-id]");
+  if (!input) return;
+  render(await api("/api/policy/toggle", {policy_id:input.dataset.policyId, enabled:input.checked}));
+  toast(input.checked ? "策略已启用" : "策略已停用");
+});
+elements.intentForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!elements.intent.value.trim()) return;
+  toast("Agent 正在理解并建立物品身份…");
+  const next = await api("/api/intent", { text: elements.intent.value, source: "自然语言" });
+  elements.intent.value = "";
+  activeCategory = "全部";
+  render(next);
+  toast(next.intent_kind === "plan" ? "已生成跨物品行动方案" : "已进入长期物品记忆");
+});
+$("#addButton").addEventListener("click", () => elements.dialog.showModal());
+$("#closeDialog").addEventListener("click", () => elements.dialog.close());
+elements.form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(elements.form);
+  render(await api("/api/capture", { name: form.get("name"), category: form.get("category"), source: form.get("source") }));
+  elements.dialog.close();
+  elements.form.reset();
+  toast("已实时加入物品仓");
+});
+$("#scanButton").addEventListener("click", async () => {
+  toast("Agent 正在结合行程、意图和物品状态…");
+  const result = await api("/api/scan");
+  activeTask = 0;
+  render(result.state);
+  setTimeout(() => elements.opportunity.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+});
+$("#discoverButton").addEventListener("click", async () => {
+  toast("Agent 正在核对订单、邮件与相册…");
+  activeTask = 0;
+  const next = await api("/api/discover");
+  render(next);
+  setTimeout(() => elements.opportunity.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+  toast(next.discovery_status === "no_change" ? "同步完成，没有发现新的物品" : "自动收录完成，只留下 1 件待确认");
+});
+elements.taskActions.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  render(await api("/api/execute", { task_id: button.dataset.task, action_id: button.dataset.action }));
+  elements.claim.textContent = "任务结果已写入长期记忆，并同步到 Watch。";
+  elements.completion.hidden = false;
+});
+elements.taskPager.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-index]");
+  if (!button) return;
+  activeTask = Number(button.dataset.index);
+  renderTask();
+});
+elements.draftActions.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-draft-action]");
+  if (!button) return;
+  const paths = {authorize:"/api/resale/authorize", publish:"/api/resale/publish", sold:"/api/resale/sold"};
+  const path = paths[button.dataset.draftAction];
+  render(await api(path, {draft_id:button.dataset.draft}));
+  const messages = {authorize:"已记录本次 Demo 授权", publish:"Demo connector 已返回模拟发布回执", sold:"已售出并退出活跃物品仓"};
+  toast(messages[button.dataset.draftAction]);
+});
+elements.draftChannels.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-channel-id]");
+  if (!button) return;
+  render(await api("/api/resale/select-channel", {draft_id:button.dataset.draft, channel_id:button.dataset.channelId}));
+  toast(`已选择${button.querySelector("strong").textContent}，等待你的授权`);
+});
+/** 把结构化草稿转换成任何二手平台都能使用的文本素材包。 */
+function buildHandoffText(draft) {
+  const channel = draft.channels.find((entry) => entry.id === draft.selected_channel);
+  return [
+    `【标题】${draft.title}`,
+    `【价格】${money(channel?.price ?? draft.price)}`,
+    `【成色】${draft.condition}`,
+    `【描述】${draft.description}`,
+    `【待拍照片】${draft.photos.join("、")}`,
+    "由 Ownly 根据物品档案生成，请在发布前确认实际成色。",
+  ].join("\n\n");
+}
+elements.handoffPanel.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-handoff]");
+  if (!button) return;
+  const draft = (state.resale_drafts || [])[0];
+  if (!draft?.selected_channel) return;
+  const text = buildHandoffText(draft);
+  if (button.dataset.handoff === "share" && navigator.share) {
+    await navigator.share({title:draft.title, text});
+    toast("已打开手机分享面板");
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+  toast(button.dataset.handoff === "share" ? "当前设备不支持分享，已改为复制全部素材" : "标题、描述、价格和拍摄清单已复制");
+});
+$("#resetButton").addEventListener("click", async () => { activeCategory = "全部"; activeTask = 0; render(await api("/api/reset")); toast("演示仓已重置"); });
+fetch("/api/state").then((response) => response.json()).then(render).catch(() => toast("无法连接 Ownly Agent"));

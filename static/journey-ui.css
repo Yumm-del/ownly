@@ -1,0 +1,5 @@
+.opportunity-card[data-tone="journey"]{background:linear-gradient(145deg,#254d72,#173f2d)}.schema-section{flex:1 0 100%;padding:11px 12px;border-radius:13px;background:#ffffff14}.schema-section strong{font-size:10px;letter-spacing:.6px}.schema-section ul{display:grid;gap:5px;margin:8px 0 0;padding-left:16px;color:#ffffffc7;font-size:10px}.warehouse-hero h1{max-width:440px}.intent-bar{box-shadow:0 10px 35px #17231c17}.intent-bar:focus-within{border-color:#173f2d;box-shadow:0 0 0 3px #d9ff5780}
+.watch-checklist{display:grid;gap:5px;margin:8px 0;padding:0;list-style:none}.watch-checklist li{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:9px;background:#ffffff12;font-size:9px}.watch-checklist b{color:#d9ff57;white-space:nowrap}
+.opportunity-card[data-tone="discovery"]{background:linear-gradient(145deg,#3a2f69,#173f2d)}
+.opportunity-card[data-tone="purchase"]{background:linear-gradient(145deg,#5b3424,#173f2d)}
+.summary{grid-template-columns:repeat(4,1fr)}.summary strong{font-size:22px}.summary div+div{padding-left:10px}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f7f5f0">
+  <title>Volt Market · 商品详情</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/shop.css">
+</head>
+<body class="shop-body">
+  <main class="shop-shell">
+    <header class="shop-top"><a href="/" aria-label="返回 Ownly">‹</a><strong>VOLT MARKET</strong><button type="button" aria-label="购物袋">袋</button></header>
+    <section class="product-visual"><span>GaN</span><div class="charger-shape"><i></i><b>65W</b></div><small>轻巧 · 双 USB-C</small></section>
+    <section class="product-copy"><p class="product-brand">VOLT · TRAVEL SERIES</p><h1>65W 氮化镓充电器</h1><div class="rating">★★★★★ <span>4.8 · 2,341 条评价</span></div><div class="price"><strong>¥169</strong><del>¥229</del></div><p>一枚即可为手机、平板和笔记本充电。适合差旅随身携带。</p><div class="choice"><span>颜色</span><button class="selected">岩石黑</button><button>月光白</button></div></section>
+    <footer class="buy-bar"><div><small>限时价格</small><strong>¥169</strong></div><button id="buyButton" type="button">立即购买</button></footer>
+  </main>
+
+  <div id="ownlyPulse" class="ownly-pulse"><i></i><span>Ownly 正在检查你是否已经拥有类似物品…</span></div>
+  <section id="ownlySheet" class="ownly-sheet" hidden aria-live="polite">
+    <div class="sheet-handle"></div><div class="sheet-brand"><span>✦</span><strong>ownly.</strong><small>系统级购买检查</small></div>
+    <h2 id="sheetTitle"></h2><p id="sheetBody"></p><div id="sheetFacts" class="sheet-facts"></div><ul id="sheetMatches"></ul><div id="sheetActions"></div>
+  </section>
+  <div id="shopToast" class="shop-toast" role="status"></div>
+  <script src="/shop.js" defer></script>
+</body>
+</html>

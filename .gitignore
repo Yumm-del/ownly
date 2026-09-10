@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+ownly.db
+ownly.db-shm
+ownly.db-wal
+server.log
+.DS_Store
