@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import os
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,10 +14,15 @@ from urllib.parse import urlparse
 from agent_core import CATEGORY_RULES, OwnlyAgent
 from storage import OwnlyStore, demo_history_records, demo_item_records
 
-HOST, PORT = "127.0.0.1", 8765
 ROOT = Path(__file__).parent
 STATIC_DIR = ROOT / "static"
-STORE = OwnlyStore(ROOT / "ownly.db")
+# 本地开发继续只监听本机；云平台提供 PORT 时自动监听公网网卡。
+PORT = int(os.environ.get("PORT", "8765"))
+HOST = os.environ.get("HOST", "0.0.0.0" if "PORT" in os.environ else "127.0.0.1")
+# 允许付费持久化磁盘把数据库目录映射到 /var/data；免费演示默认写项目目录。
+DATA_DIR = Path(os.environ.get("OWNLY_DATA_DIR", str(ROOT)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+STORE = OwnlyStore(DATA_DIR / "ownly.db")
 AGENT = OwnlyAgent(STORE)
 # 首次启动时补上演示历史流水，让新克隆下来的仓库打开就有内容
 STORE.seed_demo_history(demo_history_records())
@@ -27,6 +33,9 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlparse(self.path).path
+        if path == "/api/health":
+            self._send_json({"status": "ok", "service": "ownly"})
+            return
         if path in {"/api/state", "/api/watch"}:
             self._send_json(AGENT.snapshot())
             return
