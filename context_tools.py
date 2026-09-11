@@ -6,7 +6,7 @@ Agent planner 与 Dynamic UI 不需要随之改写。
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 
@@ -22,13 +22,15 @@ class DemoCalendarTool:
     """从旅行意图生成稳定的演示日程。"""
 
     def upcoming_trip(self, utterance: str) -> dict[str, Any]:
-        start = date.today() + timedelta(days=7)
+        start = datetime.now().astimezone() + timedelta(hours=3, minutes=40)
+        end = start + timedelta(days=3)
         return {
             "source": "Demo Calendar adapter",
             "title": "深圳产品交流行程",
             "destination": "深圳",
-            "start_date": start.isoformat(),
-            "end_date": (start + timedelta(days=3)).isoformat(),
+            "start_date": start.date().isoformat(),
+            "end_date": end.date().isoformat(),
+            "starts_at": start.isoformat(timespec="seconds"),
             "days": 4,
             "intent": utterance,
         }

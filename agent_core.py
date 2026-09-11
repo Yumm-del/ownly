@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from context_tools import DemoCalendarTool, DemoWeatherTool
@@ -306,6 +306,11 @@ class OwnlyAgent:
         """组合离家状态、近期行程和物品位置，生成无需打开 App 的主动提醒。"""
         items = {item["item_id"]: item for item in self.store.list_items()}
         trip = self.calendar.upcoming_trip("即将离家前往深圳")
+        starts_at = datetime.fromisoformat(trip["starts_at"])
+        now = datetime.now().astimezone()
+        remaining_minutes = max(0, round((starts_at - now).total_seconds() / 60))
+        remaining_hours, remaining_minutes = divmod(remaining_minutes, 60)
+        countdown = f"{remaining_hours} 小时 {remaining_minutes} 分"
         home = items.get("charger_home")
         office = items.get("charger_office")
         checks = []
@@ -319,7 +324,7 @@ class OwnlyAgent:
             "tone": "ambient",
             "title": "你准备离开，但充电器还没进包",
             "body": "根据深圳行程和离家状态，Ownly 主动检查了出行物品。家中充电器尚未检测到移动，公司还有一件备用。",
-            "facts": ["环境：正在离开家", "行程：深圳 · 4 天", "出发倒计时：3 小时 40 分"],
+            "facts": ["环境：正在离开家", "行程：深圳 · 4 天", f"出发倒计时：{countdown}"],
             "checks": checks,
             "actions": [{"id":"use_home","label":"带上家中这件","style":"primary"},{"id":"route_office","label":"去公司取备用","style":"secondary"}],
         }

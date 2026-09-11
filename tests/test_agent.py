@@ -3,7 +3,7 @@
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 
@@ -268,6 +268,10 @@ class OwnlyAgentTest(unittest.TestCase):
         self.assertEqual(plan["ui_schema"]["component"], "ambient_card")
         locations = {row["verdict"] for row in plan["ui_schema"]["checks"]}
         self.assertEqual(locations, {"仍在家中", "公司工位"})
+        self.assertIn("出发倒计时：3 小时 40 分", plan["ui_schema"]["facts"])
+        starts_at = datetime.fromisoformat(plan["context"]["trip"]["starts_at"])
+        remaining = starts_at - datetime.now().astimezone()
+        self.assertAlmostEqual(remaining.total_seconds(), 3 * 3600 + 40 * 60, delta=5)
 
     def test_departure_guard_executes_follow_up(self) -> None:
         plan = self.agent.plan_departure_guard()
