@@ -20,6 +20,20 @@ document.body.insertAdjacentHTML("beforeend", `
   </dialog>`);
 
 document.body.insertAdjacentHTML("beforeend", `
+  <dialog id="sceneDialog" class="add-dialog scene-dialog">
+    <article>
+      <header class="dialog-head"><div><p class="eyebrow">SPATIAL CAPTURE</p><h2>扫描一个空间</h2></div><button class="icon-button" type="button" data-close-scene aria-label="关闭空间扫描">×</button></header>
+      <div id="sceneCaptureStep">
+        <p class="dialog-copy">拍下房间、柜子或桌面。Ownly 会一次识别多件物品、检查重复，并只让你确认不确定的结果。</p>
+        <label class="scene-camera"><input id="scenePhoto" type="file" accept="image/*" capture="environment"><span>◎</span><strong>拍照或选择照片</strong><small id="sceneFileName">照片仅用于本次识别</small></label>
+        <label class="scene-location">这个空间是<input id="sceneLocation" value="客厅" aria-label="空间名称"></label>
+        <button id="analyzeScene" class="primary-button" type="button">让 Agent 识别物品</button>
+      </div>
+      <div id="sceneReviewStep" hidden><div class="scene-summary" id="sceneSummary"></div><div id="sceneCandidates" class="scene-candidates"></div><button id="importScene" class="primary-button" type="button">确认并加入物品仓</button><p class="privacy-note">重复物品不会再次收录；低置信度候选默认不勾选。</p></div>
+    </article>
+  </dialog>`);
+
+document.body.insertAdjacentHTML("beforeend", `
   <dialog id="valueReportDialog" class="add-dialog value-report-dialog">
     <article>
       <header><div><p class="eyebrow">MONTHLY VALUE REPORT</p><h2 id="reportMonth">本月价值账单</h2></div><button id="closeValueReport" class="icon-button" type="button" aria-label="关闭价值账单">×</button></header>
@@ -63,10 +77,13 @@ const elements = {
   reportSecured: $("#reportSecured"), reportTotals: $("#reportTotals"), reportEvents: $("#reportEvents"),
   agentWorkbench: $("#agentWorkbench"), traceLevel: $("#traceLevel"), traceContent: $("#traceContent"),
   policyDialog: $("#policyDialog"), modeOptions: $("#modeOptions"), policyList: $("#policyList"),
+  sceneDialog: $("#sceneDialog"), sceneCaptureStep: $("#sceneCaptureStep"),
+  sceneReviewStep: $("#sceneReviewStep"), sceneCandidates: $("#sceneCandidates"),
 };
 let state = null;
 let activeCategory = "全部";
 let activeTask = 0;
+let scenePreview = null;
 
 async function api(path, payload = {}) {
   const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -267,7 +284,34 @@ elements.intentForm.addEventListener("submit", async (event) => {
   render(next);
   toast(next.intent_kind === "plan" ? "已生成跨物品行动方案" : "已进入长期物品记忆");
 });
-$("#addButton").addEventListener("click", () => elements.dialog.showModal());
+$("#addButton").addEventListener("click", () => {
+  scenePreview = null;
+  elements.sceneCaptureStep.hidden = false;
+  elements.sceneReviewStep.hidden = true;
+  elements.sceneDialog.showModal();
+});
+$("[data-close-scene]").addEventListener("click", () => elements.sceneDialog.close());
+$("#scenePhoto").addEventListener("change", (event) => {
+  $("#sceneFileName").textContent = event.target.files[0]?.name || "照片仅用于本次识别";
+});
+$("#analyzeScene").addEventListener("click", async () => {
+  toast("Vision Agent 正在识别、分类并检查重复…");
+  scenePreview = await api("/api/scene/preview", {location:$("#sceneLocation").value});
+  const summary = scenePreview.summary;
+  $("#sceneSummary").innerHTML = `<strong>识别 ${summary.detected} 件</strong><span>${summary.new} 件新物品 · ${summary.duplicate} 件已存在 · ${summary.needs_review} 件待判断</span>`;
+  elements.sceneCandidates.innerHTML = scenePreview.candidates.map((item) => `<label class="scene-candidate ${item.duplicate ? "is-duplicate" : ""}"><input type="checkbox" value="${item.candidate_id}" ${item.selected ? "checked" : ""} ${item.duplicate ? "disabled" : ""}><i class="category-${item.category}">${state.category_catalog.find((entry) => entry.name === item.category)?.icon || "●"}</i><span><strong>${item.name}</strong><small>${item.category} · ${item.confidence.toLocaleString("zh-CN", {style:"percent"})} 置信度</small></span><b>${item.duplicate ? "已在仓内" : item.confidence < .8 ? "请确认" : "已识别"}</b></label>`).join("");
+  elements.sceneCaptureStep.hidden = true;
+  elements.sceneReviewStep.hidden = false;
+});
+$("#importScene").addEventListener("click", async () => {
+  const candidateIds = [...elements.sceneCandidates.querySelectorAll("input:checked")].map((input) => input.value);
+  const next = await api("/api/scene/import", {location:scenePreview.location, candidate_ids:candidateIds});
+  render(next);
+  elements.sceneDialog.close();
+  toast(`已将 ${next.scene_import.imported} 件物品加入 ${next.scene_import.location}`);
+});
+// 手动逐件收录仍保留为次级入口，便于补充视觉无法识别的物品。
+$("#addButton").addEventListener("contextmenu", (event) => { event.preventDefault(); elements.dialog.showModal(); });
 $("#closeDialog").addEventListener("click", () => elements.dialog.close());
 elements.form.addEventListener("submit", async (event) => {
   event.preventDefault();

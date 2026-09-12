@@ -182,6 +182,22 @@ class OwnlyAgentTest(unittest.TestCase):
         self.assertEqual(repeated["status"], "no_change")
         self.assertEqual(len(self.agent.snapshot()["items"]), count)
 
+    def test_scene_preview_does_not_write_before_confirmation(self) -> None:
+        before = len(self.agent.snapshot()["items"])
+        preview = self.agent.preview_scene("书房")
+        self.assertEqual(preview["summary"], {"detected":4,"new":3,"duplicate":1,"needs_review":1})
+        self.assertEqual(len(self.agent.snapshot()["items"]), before)
+
+    def test_scene_import_adds_only_selected_non_duplicates(self) -> None:
+        before = len(self.agent.snapshot()["items"])
+        result = self.agent.import_scene("书房", ["scene-speaker", "scene-book", "scene-console", "unknown"])
+        after = self.agent.snapshot()["items"]
+        self.assertEqual(result["imported"], 2)
+        self.assertEqual(len(after), before + 2)
+        imported = {item["item_id"]: item for item in after}
+        self.assertEqual(imported["scene-speaker"]["location"], "书房")
+        self.assertEqual(imported["scene-book"]["attributes"]["身份状态"], "用户已确认")
+
     def test_purchase_intent_checks_owned_items_before_buying(self) -> None:
         routed = self.agent.handle_intent("我想买一个 65W 充电器，值得买吗")
         self.assertEqual(routed["kind"], "plan")

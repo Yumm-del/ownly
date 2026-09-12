@@ -54,6 +54,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "/api/policy/toggle": lambda: self._toggle_policy(body),
                 "/api/scan": AGENT.scan,
                 "/api/discover": self._discover,
+                "/api/scene/preview": lambda: self._preview_scene(body),
+                "/api/scene/import": lambda: self._import_scene(body),
                 "/api/context-event": self._context_event,
                 "/api/execute": lambda: self._execute(body),
                 "/api/resale/publish": lambda: self._publish_resale(body),
@@ -150,6 +152,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         result = AGENT.discover_items()
         snapshot = AGENT.snapshot()
         snapshot["discovery_status"] = result.get("status", "review")
+        return snapshot
+
+    @staticmethod
+    def _preview_scene(body: dict[str, Any]) -> dict[str, Any]:
+        return AGENT.preview_scene(str(body.get("location", "客厅")))
+
+    @staticmethod
+    def _import_scene(body: dict[str, Any]) -> dict[str, Any]:
+        candidate_ids = body.get("candidate_ids", [])
+        if not isinstance(candidate_ids, list):
+            raise ValueError("候选物品格式无效")
+        result = AGENT.import_scene(str(body.get("location", "客厅")), [str(value) for value in candidate_ids])
+        snapshot = AGENT.snapshot()
+        snapshot["scene_import"] = result
         return snapshot
 
     @staticmethod

@@ -484,6 +484,57 @@ class OwnlyAgent:
         self.store.add_event("dedupe", "完成身份合并", f"自动收录 {imported} 件，跳过 1 件重复记录")
         return task
 
+    def preview_scene(self, location: str = "客厅") -> dict[str, Any]:
+        """通过可替换 Vision Adapter 返回空间中的候选物品，不立即写库。
+
+        输入是用户确认的空间名称；当前比赛原型使用确定性候选结果，未来可将
+        同一接口替换为本地视觉模型或 Agent OS 摄像头能力。只有确认步骤才写库，
+        防止一次误识别污染长期物品记忆。
+        """
+        room = location.strip() or "客厅"
+        candidates = [
+            {"candidate_id":"scene-speaker","name":"HomePod mini","category":"电子","brand":"Apple","confidence":.96,"selected":True,"duplicate":False},
+            {"candidate_id":"scene-lamp","name":"落地阅读灯","category":"家具","brand":"","confidence":.91,"selected":True,"duplicate":False},
+            {"candidate_id":"scene-book","name":"设计中的设计","category":"图书文具","brand":"原研哉","confidence":.73,"selected":False,"duplicate":False},
+            {"candidate_id":"scene-console","name":"Nintendo Switch OLED","category":"电子","brand":"Nintendo","confidence":.98,"selected":False,"duplicate":True},
+        ]
+        self.store.add_event("vision", "扫描空间并建立候选身份", f"{room} · 识别 4 件 · 1 件与已有物品匹配")
+        return {
+            "location": room,
+            "adapter": "Demo Vision Adapter",
+            "privacy": "原型只在浏览器显示照片，服务端接收结构化候选结果",
+            "candidates": candidates,
+            "summary": {"detected":4,"new":3,"duplicate":1,"needs_review":1},
+        }
+
+    def import_scene(self, location: str, candidate_ids: list[str]) -> dict[str, Any]:
+        """把用户选中的视觉候选批量写入同一个 ownership graph。"""
+        preview = self.preview_scene(location)
+        allowed = {row["candidate_id"]: row for row in preview["candidates"] if not row["duplicate"]}
+        selected = [allowed[candidate_id] for candidate_id in candidate_ids if candidate_id in allowed]
+        existing_ids = {item["item_id"] for item in self.store.list_items()}
+        imported = 0
+        for candidate in selected:
+            item_id = candidate["candidate_id"]
+            if item_id in existing_ids:
+                continue
+            rule = CATEGORY_RULES[candidate["category"]]
+            self.store.add_item({
+                "item_id": item_id,
+                "name": candidate["name"],
+                "category": candidate["category"],
+                "icon": rule["icon"],
+                "source": "空间视觉识别",
+                "brand": candidate["brand"],
+                "location": preview["location"],
+                "attributes": {"识别置信度":f"{candidate['confidence']:.0%}","身份状态":"用户已确认"},
+                "next_action": rule["action"],
+                "next_action_date": (date.today() + timedelta(days=30)).isoformat(),
+            })
+            imported += 1
+        self.store.add_event("vision", "完成空间批量建仓", f"{preview['location']} · 用户确认 {imported} 件")
+        return {"imported": imported, "location": preview["location"]}
+
     def plan_trip(self, utterance: str) -> dict[str, Any]:
         """组合日历、天气和物品仓，生成旅行准备的系统级动态界面。"""
         trip = self.calendar.upcoming_trip(utterance)
