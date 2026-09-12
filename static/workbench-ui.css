@@ -60,3 +60,4 @@
   .trace-columns { grid-template-columns: 1fr; }
   .mode-options { grid-template-columns: 1fr; }
 }
+.arbitration-note{display:grid;gap:4px;margin:12px 0;padding:12px;border:1px solid #ffffff24;border-radius:14px;background:#ffffff0b}.arbitration-note span{color:var(--acid);font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.arbitration-note strong{font-size:12px}.arbitration-note small{color:#ffffff91;line-height:1.4}.arbitration-pause{margin:0;padding:12px;border:1px solid #ffffff2b;border-radius:13px;color:#ffffffb5;font-size:12px;line-height:1.45}.agent-steps .is-paused i{background:#d7a947}

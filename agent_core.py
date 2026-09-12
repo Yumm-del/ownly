@@ -10,6 +10,24 @@ from context_tools import DemoCalendarTool, DemoWeatherTool
 from storage import RESALE_CHANNELS, OwnlyStore, demo_item_records
 
 
+# 中央仲裁器使用确定性规则做控制面，不让 LLM 自行决定安全与授权优先级。
+# 分数只表达“现在先处理什么”，并不删除或完成被暂缓的任务。
+TASK_ROUTING = {
+    "safety_alert": {"score": 600, "role": "守护 Agent", "reason": "人身或产品安全风险优先"},
+    "purchase_decision": {"score": 520, "role": "获得 Agent", "reason": "用户正在做明确的购买决定"},
+    "return_window": {"score": 500, "role": "守护 Agent", "reason": "退货期限临近，错过后损失不可逆"},
+    "price_protection": {"score": 480, "role": "守护 Agent", "reason": "价保存在期限和财务损失"},
+    "departure_guard": {"score": 460, "role": "使用 Agent", "reason": "环境变化要求立即完成出发检查"},
+    "trip_prep": {"score": 450, "role": "使用 Agent", "reason": "近期行程需要跨物品准备"},
+    "trip_preparation": {"score": 450, "role": "使用 Agent", "reason": "近期行程需要跨物品准备"},
+    "replenish": {"score": 300, "role": "使用 Agent", "reason": "消耗预测需要补给决策"},
+    "maintenance": {"score": 240, "role": "使用 Agent", "reason": "维护可以在紧急事项之后处理"},
+    "resale": {"score": 200, "role": "流转 Agent", "reason": "闲置流转属于可延后优化"},
+    "source_review": {"score": 180, "role": "获得 Agent", "reason": "候选物品等待身份确认"},
+}
+DEFAULT_ROUTING = {"score": 100, "role": "所有权 Agent", "reason": "普通所有权事件"}
+
+
 CATEGORY_RULES = {
     "电子": {"group":"数码家电", "keywords": ("充电器", "移动电源", "耳机", "手机", "电脑", "相机", "平板", "手表", "游戏机"), "icon": "◉", "action": "检查保修、电池与价值"},
     "家电": {"group":"数码家电", "keywords": ("电视", "冰箱", "空调", "洗衣机", "吸尘器", "咖啡机"), "icon": "▣", "action": "跟滤芯、清洁与保修"},
@@ -233,9 +251,14 @@ class OwnlyAgent:
             "replenish":["实际用量可能因出行计划而变化"],
             "maintenance":["真实清洁状态尚未经过视觉确认"],
         }.get(task_type, ["当前结论会随新的物品事件更新"])
-        needs_confirmation = bool(schema.get("actions"))
+        paused = task.get("attention_state") == "paused"
+        needs_confirmation = bool(schema.get("actions")) and not paused
         return {
-            "headline":"已完成判断，等待你的选择" if needs_confirmation else "正在持续观察",
+            "headline": "已暂缓，先处理更紧急的事" if paused else ("已完成判断，等待你的选择" if needs_confirmation else "正在持续观察"),
+            "role": task.get("agent_role", "所有权 Agent"),
+            "attention_state": task.get("attention_state", "active"),
+            "priority_reason": task.get("priority_reason", "当前结论会随新事件更新"),
+            "paused_by_title": task.get("paused_by_title"),
             "autonomy_level":AUTONOMY_CAPABILITIES[capability_id]["level"],
             "capability":AUTONOMY_CAPABILITIES[capability_id]["label"],
             "evidence":schema.get("facts", []),
@@ -245,10 +268,42 @@ class OwnlyAgent:
                 {"phase":"感知","status":"completed","detail":"物品事件已进入 Agent"},
                 {"phase":"判断","status":"completed","detail":f"已检查 {len(schema.get('facts', []))} 条证据和反证"},
                 {"phase":"规划","status":"completed","detail":schema["title"]},
-                {"phase":"授权","status":"waiting" if needs_confirmation else "not_required","detail":"等待你的选择" if needs_confirmation else "当前动作不需要授权"},
+                {"phase":"授权","status":"paused" if paused else ("waiting" if needs_confirmation else "not_required"),"detail":f"先处理：{task['paused_by_title']}" if paused else ("等待你的选择" if needs_confirmation else "当前动作不需要授权")},
                 {"phase":"执行","status":"pending","detail":"尚未产生外部影响"},
                 {"phase":"验证","status":"pending","detail":"执行后等待工具回执"},
             ],
+        }
+
+    @staticmethod
+    def _arbitrate_tasks(tasks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """统一排序并解释任务冲突，始终只开放当前最高优先级行动。"""
+        if not tasks:
+            return [], {"state": "quiet", "primary": None, "active_count": 0, "paused_count": 0}
+
+        ranked: list[dict[str, Any]] = []
+        for original in tasks:
+            task = dict(original)
+            routing = TASK_ROUTING.get(task.get("task_type", ""), DEFAULT_ROUTING)
+            task["arbitration_score"] = routing["score"]
+            task["agent_role"] = routing["role"]
+            task["priority_reason"] = routing["reason"]
+            ranked.append(task)
+        ranked.sort(key=lambda task: (-task["arbitration_score"], task.get("created_at", "")))
+
+        primary = ranked[0]
+        for task in ranked:
+            active = task["arbitration_score"] == primary["arbitration_score"]
+            task["attention_state"] = "active" if active else "paused"
+            if not active:
+                task["paused_by"] = primary["task_id"]
+                task["paused_by_title"] = primary["title"]
+
+        active_count = sum(task["attention_state"] == "active" for task in ranked)
+        return ranked, {
+            "state": "focused",
+            "primary": {"task_id": primary["task_id"], "title": primary["title"], "role": primary["agent_role"], "reason": primary["priority_reason"]},
+            "active_count": active_count,
+            "paused_count": len(ranked) - active_count,
         }
 
     def plan_purchase(self, utterance: str) -> dict[str, Any]:
@@ -535,7 +590,7 @@ class OwnlyAgent:
 
     def snapshot(self) -> dict[str, Any]:
         items = self.store.list_items()
-        tasks = self.store.pending_plans() + self.store.pending_tasks()
+        tasks, arbitration = self._arbitrate_tasks(self.store.pending_plans() + self.store.pending_tasks())
         for task in tasks:
             task["agent_trace"] = self._task_agent_trace(task)
         open_returns = sum(1 for item in items if item.get("attributes", {}).get("退货截止", "") >= date.today().isoformat())
@@ -547,7 +602,7 @@ class OwnlyAgent:
                 "value_report": self.store.value_report(),
                 "lifecycle_events": self.store.lifecycle_events(), "resale_drafts": self.store.resale_drafts(),
                 "agent_runs": self.store.agent_runs(), "capabilities": AUTONOMY_CAPABILITIES,
-                "policy_center": self.policy_center()}
+                "policy_center": self.policy_center(), "attention_arbitration": arbitration}
 
     def select_resale_channel(self, draft_id: str, channel_id: str) -> dict[str, Any]:
         """让 Agent 保存渠道选择，但不越过用户执行账号授权。"""

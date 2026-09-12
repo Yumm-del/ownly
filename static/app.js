@@ -120,6 +120,7 @@ function renderTask() {
   activeTask = Math.min(activeTask, tasks.length - 1);
   const task = tasks[activeTask];
   const schema = task.ui_schema;
+  const paused = task.attention_state === "paused";
   elements.opportunity.hidden = false;
   elements.opportunity.dataset.tone = schema.tone;
   elements.taskTitle.textContent = schema.title;
@@ -131,13 +132,15 @@ function renderTask() {
   elements.taskChecklist.hidden = !(detailRows || []).length;
   elements.taskChecklist.innerHTML = (detailRows || []).map((row) =>
     `<li class="trip-row is-${row.state}"><span>${row.label}</span><b>${row.verdict}</b><small>${row.detail}</small></li>`).join("");
-  elements.taskActions.innerHTML = schema.actions.map((action) => `<button type="button" data-task="${task.task_id}" data-action="${action.id}" class="${action.style === "primary" ? "primary-button light" : "secondary-button"}">${action.label}</button>`).join("");
+  elements.taskActions.innerHTML = paused
+    ? `<p class="arbitration-pause">先处理“${task.paused_by_title}”，完成后这项行动会自动恢复。</p>`
+    : schema.actions.map((action) => `<button type="button" data-task="${task.task_id}" data-action="${action.id}" class="${action.style === "primary" ? "primary-button light" : "secondary-button"}">${action.label}</button>`).join("");
   elements.taskPager.innerHTML = tasks.map((_, index) => `<button type="button" data-index="${index}" class="${index === activeTask ? "active" : ""}" aria-label="查看任务 ${index + 1}"></button>`).join("");
   const trace = task.agent_trace;
   elements.agentWorkbench.hidden = !trace;
   if (trace) {
     elements.traceLevel.textContent = trace.autonomy_level;
-    elements.traceContent.innerHTML = `<p class="trace-headline">${trace.headline}</p><div class="trace-columns"><section><small>支持证据</small><ul>${trace.evidence.map((row) => `<li>${row}</li>`).join("")}</ul></section><section><small>仍需注意</small><ul>${trace.counterevidence.map((row) => `<li>${row}</li>`).join("")}</ul></section></div>${trace.matched_policy ? `<p class="matched-policy"><span>命中长期策略</span><strong>${trace.matched_policy.name}</strong><small>${trace.matched_policy.behavior === "prepare_only" ? "允许自动准备，提交前仍需确认" : "涉及外部影响时始终确认"}</small></p>` : ""}<ol class="agent-steps">${trace.steps.map((step) => `<li class="is-${step.status}"><i></i><div><strong>${step.phase}</strong><small>${step.detail}</small></div></li>`).join("")}</ol>`;
+    elements.traceContent.innerHTML = `<p class="trace-headline">${trace.headline}</p><p class="arbitration-note"><span>${trace.role}</span><strong>${trace.priority_reason}</strong>${trace.paused_by_title ? `<small>暂缓原因：${trace.paused_by_title} 的优先级更高</small>` : ""}</p><div class="trace-columns"><section><small>支持证据</small><ul>${trace.evidence.map((row) => `<li>${row}</li>`).join("")}</ul></section><section><small>仍需注意</small><ul>${trace.counterevidence.map((row) => `<li>${row}</li>`).join("")}</ul></section></div>${trace.matched_policy ? `<p class="matched-policy"><span>命中长期策略</span><strong>${trace.matched_policy.name}</strong><small>${trace.matched_policy.behavior === "prepare_only" ? "允许自动准备，提交前仍需确认" : "涉及外部影响时始终确认"}</small></p>` : ""}<ol class="agent-steps">${trace.steps.map((step) => `<li class="is-${step.status}"><i></i><div><strong>${step.phase}</strong><small>${step.detail}</small></div></li>`).join("")}</ol>`;
   }
 }
 

@@ -77,6 +77,27 @@ class OwnlyAgentTest(unittest.TestCase):
             {"replenish", "maintenance", "price_protection", "return_window", "resale"},
         )
 
+    def test_attention_arbiter_pauses_lower_priority_tasks(self) -> None:
+        """期限风险应先于补货、维护和闲置流转，并解释暂缓原因。"""
+        self.agent.scan()
+        state = self.agent.snapshot()
+        self.assertEqual(state["attention_arbitration"]["primary"]["role"], "守护 Agent")
+        self.assertEqual(state["tasks"][0]["task_type"], "return_window")
+        self.assertEqual(state["tasks"][0]["attention_state"], "active")
+        maintenance = next(task for task in state["tasks"] if task["task_type"] == "maintenance")
+        self.assertEqual(maintenance["attention_state"], "paused")
+        self.assertEqual(maintenance["paused_by"], state["tasks"][0]["task_id"])
+        self.assertIn("退货", maintenance["agent_trace"]["paused_by_title"])
+
+    def test_attention_arbiter_releases_next_task_after_completion(self) -> None:
+        """最高优先级任务完成后，下一项期限任务应自动恢复。"""
+        self.agent.scan()
+        first = self.agent.snapshot()["tasks"][0]
+        self.agent.execute(first["task_id"], first["ui_schema"]["actions"][0]["id"])
+        next_state = self.agent.snapshot()
+        self.assertEqual(next_state["tasks"][0]["task_type"], "price_protection")
+        self.assertEqual(next_state["tasks"][0]["attention_state"], "active")
+
     def test_trip_card_arrives_after_guardian_tasks_resolved(self) -> None:
         """行程事件在守护任务处理完后到达，生成出发卡（含逐项物品检查）。"""
         guardian = self.agent.scan()
@@ -229,6 +250,8 @@ class OwnlyAgentTest(unittest.TestCase):
 
     def test_price_task_explains_policy_and_agent_stages(self) -> None:
         self.agent.scan()
+        first = self.agent.snapshot()["tasks"][0]
+        self.agent.execute(first["task_id"], first["ui_schema"]["actions"][0]["id"])
         price_task = next(task for task in self.agent.snapshot()["tasks"] if task.get("task_type") == "price_protection")
         trace = price_task["agent_trace"]
         self.assertEqual(trace["autonomy_level"], "L1")
